@@ -1,0 +1,19 @@
+[project]
+name = "hytek-automated-athletes-entries"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "steadman1", email = "steadman@vt.edu" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "hytek-parser>=3.0.0",
+]
+
+[project.scripts]
+hytek-automated-athletes-entries = "hytek_automated_athletes_entries:main"
+
+[build-system]
+requires = ["uv_build>=0.12.8,<0.13.0"]
+build-backend = "uv_build"
