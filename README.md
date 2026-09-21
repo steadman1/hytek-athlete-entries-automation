@@ -4,7 +4,7 @@ A CLI-tool for populating .mdb files for use in Hytek's Team Manager software
 
 ## Usage
 
-This tool is built for coaches that are entering athletes and entries for meets inside **Team Manager 8.0 Lite** and find the process tedious. It is also built to take in all required info from one or more *.csv files and programmatically populate athlete info including IDs and populate entry info using NLP (optional).
+This tool is built for coaches that are entering single-team athletes and entries for meets inside **Team Manager 8.0 Lite** and find the process tedious. It is also built to take in all required info from one or more *.csv files and programmatically populate athlete info including IDs and populate entry info using NLP (optional).
 
 ## Input
 - ***.hyv meet file** which contains valid events for entry

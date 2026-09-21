@@ -1,5 +1,5 @@
 [project]
-name = "hytek-automated-athletes-entries"
+name = "hytek-ae"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -8,11 +8,13 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "click>=8.5.0",
     "hytek-parser>=3.0.0",
+    "pyodbc>=5.3.0",
 ]
 
 [project.scripts]
-hytek-automated-athletes-entries = "hytek_automated_athletes_entries:main"
+hytek-automated-athletes-entries = "hytek-ae:main"
 
 [build-system]
 requires = ["uv_build>=0.12.8,<0.13.0"]
