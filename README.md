@@ -8,7 +8,7 @@ This tool is built for coaches that are entering athletes and entries for meets 
 
 ## Input
 - ***.hyv meet file** which contains valid events for entry
-- **althlete_ids.csv** (optional) which contains columns with first name, last name, and athlete ID
-- **althlete_entries.csv** which contains columns with first name, last name, and athlete ID
+- **althletes.csv** which contains columns with first name, last name, and athlete ID (optional)
+- **entries.csv** which contains columns with (UPDATE) first name, last name, gender, events, custom times
   - [Form template we use](https://docs.google.com/forms/d/1_5v9OgbT_4q61MsBgtTZwK1yvOSkMpWTPARDmZM_7Fo/edit)
   - [Sheet template we get from the form](https://docs.google.com/spreadsheets/d/1ER1hUFQehKXsMGF54FkG0XjhNp1Oud5mWl59T8nKghk/edit?usp=sharing)
