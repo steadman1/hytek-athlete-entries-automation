@@ -1,11 +1,11 @@
 """Interactive wizard prompts and column selection for hytek-ae CLI."""
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import click
 
-from hytek_ae.core.csv_reader import auto_detect_athlete_columns
+from hytek_ae.core.csv_reader import auto_detect_athlete_columns, auto_detect_entry_columns
 from hytek_ae.core.models import Team
 
 
@@ -46,7 +46,11 @@ def select_column_interactively(
     click.echo(f"\nSelect column for '{role_name}':")
     for idx, h in enumerate(headers, 1):
         mark = " (detected)" if h == detected_col else ""
-        click.echo(f"  [{idx}] {h}{mark}")
+        # Clean multi-line headers for clean display
+        display_h = h.replace("\n", " ")
+        if len(display_h) > 75:
+            display_h = display_h[:72] + "..."
+        click.echo(f"  [{idx}] {display_h}{mark}")
     if allow_none:
         click.echo("  [0] (None / Skip)")
 
@@ -91,10 +95,54 @@ def resolve_athlete_columns(
     if skip_interactive:
         return {"first_name": fn, "last_name": ln, "id": id_c}
 
-    # If any is missing, prompt interactively
-    click.echo("\n--- Map Athlete CSV Columns ---")
+    # Prompt interactively
+    click.echo("\n--- Map Athlete IDs CSV Columns ---")
     fn = select_column_interactively("First Name", headers, fn, allow_none=False)
     ln = select_column_interactively("Last Name", headers, ln, allow_none=False)
-    id_c = select_column_interactively("Athlete ID", headers, id_c, allow_none=True)
+    id_c = select_column_interactively("Athlete / Member ID", headers, id_c, allow_none=False)
 
     return {"first_name": fn, "last_name": ln, "id": id_c}
+
+
+def resolve_entry_columns(
+    headers: List[str],
+    skip_interactive: bool = False,
+    first_name_col: Optional[str] = None,
+    last_name_col: Optional[str] = None,
+    gender_col: Optional[str] = None,
+    events_col: Optional[str] = None,
+    times_col: Optional[str] = None,
+) -> Dict[str, Optional[str]]:
+    """Determine column mappings for meet entries CSV (first name, last name, gender, events, custom times)."""
+    detected = auto_detect_entry_columns(headers)
+
+    fn = first_name_col or detected["first_name"]
+    ln = last_name_col or detected["last_name"]
+    gen = gender_col or detected["gender"]
+    ev_c = events_col or detected["events_col"]
+    time_c = times_col or detected["times_col"]
+
+    if skip_interactive:
+        return {
+            "first_name": fn,
+            "last_name": ln,
+            "gender": gen,
+            "events_col": ev_c,
+            "times_col": time_c,
+        }
+
+    # Prompt interactively
+    click.echo("\n--- Map Meet Entries CSV Columns ---")
+    fn = select_column_interactively("First Name", headers, fn, allow_none=False)
+    ln = select_column_interactively("Last Name", headers, ln, allow_none=False)
+    gen = select_column_interactively("Gender / Division", headers, gen, allow_none=True)
+    ev_c = select_column_interactively("Chosen Events", headers, ev_c, allow_none=True)
+    time_c = select_column_interactively("Custom / Seed Times", headers, time_c, allow_none=True)
+
+    return {
+        "first_name": fn,
+        "last_name": ln,
+        "gender": gen,
+        "events_col": ev_c,
+        "times_col": time_c,
+    }

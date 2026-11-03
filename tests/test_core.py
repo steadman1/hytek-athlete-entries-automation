@@ -4,8 +4,8 @@ from datetime import date
 
 from hytek_ae.core.models import Athlete, Entry, Meet, MeetEvent, Team
 from hytek_ae.core.time_parser import format_centiseconds, parse_time_to_centiseconds
-from hytek_ae.core.csv_reader import auto_detect_athlete_columns
-from hytek_ae.core.nlp import NLPExtractor
+from hytek_ae.core.csv_reader import auto_detect_athlete_columns, auto_detect_entry_columns
+from hytek_ae.core.nlp import NLPExtractor, parse_events_field, parse_times_field
 from hytek_ae.db.operations import (
     pack_athlete_params,
     pack_entry_params,
@@ -45,12 +45,49 @@ def test_format_centiseconds():
 
 
 def test_auto_detect_columns():
-    headers = ["First Name", "Last Name", "USA Swimming ID", "Gender", "Event 1"]
-    cols = auto_detect_athlete_columns(headers)
+    # College club swimming roster export style
+    ccs_headers = ["", "First Name", "Last Name", "Status", "Member ID", "Registration Date"]
+    cols = auto_detect_athlete_columns(ccs_headers)
     assert cols["first_name"] == "First Name"
     assert cols["last_name"] == "Last Name"
-    assert cols["id"] == "USA Swimming ID"
-    assert cols["gender"] == "Gender"
+    assert cols["id"] == "Member ID"
+
+    # Form entries style
+    form_headers = [
+        "First Name", "Last Name", "Who do you plan to compete against",
+        "Individual Events Select up to 3",
+        "Please indicate if you would like to include a seed time in the following format",
+    ]
+    entry_cols = auto_detect_entry_columns(form_headers)
+    assert entry_cols["first_name"] == "First Name"
+    assert entry_cols["last_name"] == "Last Name"
+    assert entry_cols["gender"] == "Who do you plan to compete against"
+    assert entry_cols["events_col"] == "Individual Events Select up to 3"
+    assert "seed time" in entry_cols["times_col"].lower()
+
+
+def test_form_fields_parsing():
+    valid_events = [
+        MeetEvent(number=6, gender="M", distance=100, stroke="MEDLEY"),
+        MeetEvent(number=19, gender="F", distance=50, stroke="BREASTSTROKE"),
+        MeetEvent(number=20, gender="M", distance=50, stroke="BREASTSTROKE"),
+        MeetEvent(number=23, gender="F", distance=50, stroke="FREESTYLE"),
+        MeetEvent(number=24, gender="M", distance=50, stroke="FREESTYLE"),
+    ]
+
+    # Test event range e.g. "19-20: 50 Breast, 23-24: 50 Free" for Male
+    chosen_m = parse_events_field("19-20: 50 Breast, 23-24: 50 Free", "M", valid_events)
+    assert chosen_m == [20, 24]
+
+    # Test event range for Female
+    chosen_f = parse_events_field("19-20: 50 Breast, 23-24: 50 Free", "F", valid_events)
+    assert chosen_f == [19, 23]
+
+    # Test times parsing: multiline or comma separated
+    times_text = "50 Free: 22.20\n20: 28.71"
+    times = parse_times_field(times_text, "M", valid_events)
+    assert times.get(24) == 2220
+    assert times.get(20) == 2871
 
 
 def test_deterministic_nlp_fallback():
@@ -60,11 +97,9 @@ def test_deterministic_nlp_fallback():
         MeetEvent(number=24, gender="M", distance=50, stroke="FREESTYLE"),
     ]
 
-    # Explicit event number
     res = extractor.parse_entry_text("Event 6: 58.69", "M", events)
     assert res == [(6, 5869)]
 
-    # Distance + stroke
     res2 = extractor.parse_entry_text("50 Free 23.69", "M", events)
     assert res2 == [(24, 2369)]
 
@@ -72,7 +107,7 @@ def test_deterministic_nlp_fallback():
 def test_param_packing_matches_schema():
     team = Team(code="VTECH", name="Swim Club at Virginia Tech", city="Blacksburg", state="VA")
     team_params = pack_team_params(team)
-    assert team_params[0] == 1  # Team PK
+    assert team_params[0] == 1
     assert team_params[1] == "VTECH"
 
     meet = Meet(name="Pajama Meet", start_date=date(2026, 9, 27), end_date=date(2026, 9, 27))
@@ -89,8 +124,8 @@ def test_param_packing_matches_schema():
 
     entry = Entry(entry_id=1, athlete_id=1, meet_id=1, team_id=1, event_number=6, score=5869)
     ent_params = pack_entry_params(entry)
-    assert ent_params[0] == 1  # meet_id
-    assert ent_params[1] == 1  # athlete_id
-    assert ent_params[5] == 5869  # score centiseconds
-    assert ent_params[6] == 6  # MtEvent
-    assert ent_params[7] == 1  # entry_id
+    assert ent_params[0] == 1
+    assert ent_params[1] == 1
+    assert ent_params[5] == 5869
+    assert ent_params[6] == 6
+    assert ent_params[7] == 1

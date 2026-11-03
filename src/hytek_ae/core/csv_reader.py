@@ -22,7 +22,8 @@ def read_csv_rows(path: Path | str) -> Tuple[List[str], List[Dict[str, str]]]:
                 raw_headers = next(reader, None)
                 if raw_headers is None:
                     return [], []
-                headers = [h.strip() for h in raw_headers]
+                # Keep original non-empty trimmed headers or assign index fallback for blank cols
+                headers = [h.strip() if h.strip() else f"_col_{i}" for i, h in enumerate(raw_headers)]
                 dict_reader = csv.DictReader(f, fieldnames=headers)
                 rows = [
                     {k: (v or "").strip() for k, v in r.items() if k is not None}
@@ -42,6 +43,7 @@ def _normalize_header(h: str) -> str:
 def auto_detect_athlete_columns(headers: List[str]) -> Dict[str, Optional[str]]:
     """Heuristically find columns for: 'first_name', 'last_name', 'id', 'gender'.
     Returns a dict mapping role -> column name (or None if not found).
+    Works with standard CSVs and College Club Swimming roster exports (memberTable.csv).
     """
     mapping: Dict[str, Optional[str]] = {
         "first_name": None,
@@ -52,7 +54,23 @@ def auto_detect_athlete_columns(headers: List[str]) -> Dict[str, Optional[str]]:
 
     norm_to_orig = {_normalize_header(h): h for h in headers}
 
-    # First name
+    # 1. Athlete ID: check for Member ID / CCS ID / Club ID first, before generic 'id'
+    for pat in ("memberid", "athleteid", "ccsid", "clubid", "usaswid", "idno", "idnumber"):
+        for norm, orig in norm_to_orig.items():
+            if norm == pat:
+                mapping["id"] = orig
+                break
+        if mapping["id"]:
+            break
+
+    # Fallback to general 'id' if not already found
+    if not mapping["id"]:
+        for norm, orig in norm_to_orig.items():
+            if norm == "id" or (norm.endswith("id") and "first" not in norm and "last" not in norm and "event" not in norm):
+                mapping["id"] = orig
+                break
+
+    # 2. First name
     for pat in ("firstname", "first", "fname", "givenname"):
         for norm, orig in norm_to_orig.items():
             if norm == pat or (pat in norm and "last" not in norm):
@@ -61,7 +79,7 @@ def auto_detect_athlete_columns(headers: List[str]) -> Dict[str, Optional[str]]:
         if mapping["first_name"]:
             break
 
-    # Last name
+    # 3. Last name
     for pat in ("lastname", "last", "lname", "surname", "familyname"):
         for norm, orig in norm_to_orig.items():
             if norm == pat or (pat in norm and "first" not in norm):
@@ -70,25 +88,47 @@ def auto_detect_athlete_columns(headers: List[str]) -> Dict[str, Optional[str]]:
         if mapping["last_name"]:
             break
 
-    # Athlete ID
-    for pat in ("athleteid", "idno", "idnumber", "clubid", "usaswid", "id", "memberid"):
-        for norm, orig in norm_to_orig.items():
-            if norm == pat:
-                mapping["id"] = orig
-                break
-            if pat in norm and norm not in ("firstname", "lastname", "eventid"):
-                mapping["id"] = orig
-                break
-        if mapping["id"]:
-            break
-
-    # Gender
-    for pat in ("gender", "sex"):
+    # 4. Gender / Sex / "Who do you plan to compete against"
+    for pat in ("gender", "sex", "whodoyouplanto", "competeagainst"):
         for norm, orig in norm_to_orig.items():
             if norm == pat or pat in norm:
                 mapping["gender"] = orig
                 break
         if mapping["gender"]:
+            break
+
+    return mapping
+
+
+def auto_detect_entry_columns(headers: List[str]) -> Dict[str, Any]:
+    """Auto-detect columns in the entries CSV:
+    - first_name
+    - last_name
+    - gender
+    - events_col: column listing chosen events (e.g. 'Individual Events Select up to 3')
+    - times_col: column listing custom seed times (e.g. 'Please indicate if you would like to include a seed time')
+    """
+    ath_map = auto_detect_athlete_columns(headers)
+    mapping: Dict[str, Any] = {
+        "first_name": ath_map.get("first_name"),
+        "last_name": ath_map.get("last_name"),
+        "gender": ath_map.get("gender"),
+        "events_col": None,
+        "times_col": None,
+    }
+
+    norm_to_orig = {_normalize_header(h): h for h in headers}
+
+    # Detect times column
+    for norm, orig in norm_to_orig.items():
+        if ("seedtime" in norm or "customtime" in norm or ("time" in norm and "format" in norm) or "seed" in norm) and "timestamp" not in norm:
+            mapping["times_col"] = orig
+            break
+
+    # Detect events column
+    for norm, orig in norm_to_orig.items():
+        if ("individualevents" in norm or "eventsselect" in norm or "chosenevents" in norm or "events" in norm) and orig != mapping.get("times_col") and "relay" not in norm:
+            mapping["events_col"] = orig
             break
 
     return mapping

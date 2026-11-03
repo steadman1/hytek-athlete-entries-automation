@@ -1,10 +1,10 @@
-"""OpenAI integration for parsing non-standard event entries and messy times.
+"""OpenAI integration and deterministic parsers for meet entries and messy times.
 
-When configured with an api_key and optional completions base_url, this module
-can interpret messy free-text form inputs (e.g. from Google Forms / Sheets) like:
-  "50 Free (23.50), 100 Breast (1:05.2)"
-  "500 Free - 5 min 30 sec"
-and map them to valid meet events and centisecond times.
+Interprets free-text and form inputs like:
+  "19-20: 50 Breast, 23-24: 50 Free"
+  "100 Free: 48.83\n100 Fly: 54.63\n50 Free: 22.20"
+  "6, 26.56"
+and maps them to valid meet events and centisecond times.
 """
 from __future__ import annotations
 
@@ -18,6 +18,133 @@ from hytek_ae.core.models import MeetEvent
 from hytek_ae.core.time_parser import parse_time_to_centiseconds
 
 logger = logging.getLogger(__name__)
+
+
+def parse_events_field(
+    events_text: str,
+    athlete_gender: str,
+    valid_events: List[MeetEvent],
+) -> List[int]:
+    """Parse comma/newline separated chosen events text (e.g. '19-20: 50 Breast, 23-24: 50 Free')
+    into a list of event_numbers matching the meet events and athlete gender.
+    """
+    if not events_text or not events_text.strip():
+        return []
+
+    gender_code = athlete_gender.upper()[:1] if athlete_gender else "X"
+    matched_event_nums: List[int] = []
+
+    # Split by comma or newline
+    parts = re.split(r"[,;\n\r]+", events_text)
+    for part in parts:
+        p = part.strip()
+        if not p:
+            continue
+
+        # Pattern 1: e.g. "19-20: 50 Breast" or "23-24: 50 Free" or "6: 100 IM"
+        range_match = re.search(r"\b(\d+)(?:\s*-\s*(\d+))?\s*:\s*(.*)", p)
+        if range_match:
+            ev_start = int(range_match.group(1))
+            ev_end = int(range_match.group(2)) if range_match.group(2) else ev_start
+            # Find the event in range that matches gender
+            matching = [
+                e.number for e in valid_events
+                if ev_start <= e.number <= ev_end and e.gender in ("X", gender_code)
+            ]
+            if matching:
+                matched_event_nums.extend(matching)
+                continue
+
+        # Pattern 2: e.g. "#6" or "Event 6" or just an integer number
+        num_match = re.match(r"^(?:event\s*#?|#)?(\d+)\b", p, re.IGNORECASE)
+        if num_match:
+            ev_no = int(num_match.group(1))
+            if any(e.number == ev_no for e in valid_events):
+                matched_event_nums.append(ev_no)
+                continue
+
+        # Pattern 3: distance + stroke (e.g. "50 Free", "100 Breast")
+        for ev in valid_events:
+            if ev.gender not in ("X", gender_code):
+                continue
+            dist_str = str(ev.distance)
+            stroke_terms = {
+                "FREESTYLE": ["free", "freestyle", "fr"],
+                "BACKSTROKE": ["back", "backstroke", "bk"],
+                "BREASTSTROKE": ["breast", "breaststroke", "br"],
+                "BUTTERFLY": ["fly", "butterfly", "fl"],
+                "MEDLEY": ["im", "medley", "individual medley"],
+            }.get(ev.stroke, [])
+            pattern = rf"\b{dist_str}\b\s*(?:{'|'.join(stroke_terms)})\b"
+            if re.search(pattern, p, re.IGNORECASE):
+                if ev.number not in matched_event_nums:
+                    matched_event_nums.append(ev.number)
+                break
+
+    # De-duplicate while preserving order
+    seen = set()
+    return [x for x in matched_event_nums if not (x in seen or seen.add(x))]
+
+
+def parse_times_field(
+    times_text: str,
+    athlete_gender: str,
+    valid_events: List[MeetEvent],
+) -> Dict[int, int]:
+    """Parse custom times text like:
+        "100 Free: 48.83\n100 Fly: 54.63\n50 Free: 22.20"
+        "6, 26.56"
+        "Event 24: 23.69"
+    into a mapping: {event_number: centiseconds}.
+    """
+    if not times_text or not times_text.strip():
+        return {}
+
+    gender_code = athlete_gender.upper()[:1] if athlete_gender else "X"
+    times_map: Dict[int, int] = {}
+
+    lines = re.split(r"[\n\r;]+", times_text)
+    for line in lines:
+        l = line.strip()
+        if not l:
+            continue
+
+        # Format A: "6, 26.56" or "6: 26.56" or "#6 26.56"
+        m_num = re.match(r"^(?:event\s*#?|#)?(\d+)\s*[,:\s-]+\s*([0-9:.]+)\s*(?:[YSLysl])?$", l, re.IGNORECASE)
+        if m_num:
+            ev_no = int(m_num.group(1))
+            time_str = m_num.group(2)
+            if any(e.number == ev_no for e in valid_events):
+                try:
+                    times_map[ev_no] = parse_time_to_centiseconds(time_str)
+                    continue
+                except ValueError:
+                    pass
+
+        # Format B: "100 Free: 48.83" or "50 Freestyle: 22.20"
+        for ev in valid_events:
+            if ev.gender not in ("X", gender_code):
+                continue
+            dist_str = str(ev.distance)
+            stroke_terms = {
+                "FREESTYLE": ["free", "freestyle", "fr"],
+                "BACKSTROKE": ["back", "backstroke", "bk"],
+                "BREASTSTROKE": ["breast", "breaststroke", "br"],
+                "BUTTERFLY": ["fly", "butterfly", "fl"],
+                "MEDLEY": ["im", "medley", "individual medley"],
+            }.get(ev.stroke, [])
+
+            pattern = rf"\b{dist_str}\b\s*(?:{'|'.join(stroke_terms)})\b\s*[:=-]?\s*([0-9:.]+)\s*(?:[YSLysl])?"
+            m_stroke = re.search(pattern, l, re.IGNORECASE)
+            if m_stroke:
+                time_str = m_stroke.group(1)
+                try:
+                    times_map[ev.number] = parse_time_to_centiseconds(time_str)
+                    break
+                except ValueError:
+                    pass
+
+    return times_map
 
 
 class NLPExtractor:
@@ -61,16 +188,7 @@ class NLPExtractor:
         athlete_gender: str,
         valid_events: List[MeetEvent],
     ) -> List[Tuple[int, int]]:
-        """Parse raw user-typed text into a list of (event_number, centiseconds).
-
-        Args:
-            raw_text: user-supplied text from a CSV entry cell
-            athlete_gender: "M" or "F"
-            valid_events: available MeetEvent objects from the .hyv file
-
-        Returns:
-            List of (event_number, centiseconds)
-        """
+        """Parse raw user-typed text into a list of (event_number, centiseconds)."""
         if not raw_text or not raw_text.strip():
             return []
 
@@ -97,28 +215,24 @@ class NLPExtractor:
         valid_events: List[MeetEvent],
     ) -> Optional[List[Tuple[int, int]]]:
         """Try simple, fast matching before calling the API."""
-        # Normalize text
         t = text.strip()
         gender_code = athlete_gender.upper()[:1] if athlete_gender else "X"
 
-        # Check for event number prefix e.g. "Event 6: 58.69" or "#6 58.69"
-        num_match = re.match(r"^(?:event\s*#?|#)?(\d+)\b[:\s-]*(.*)$", t, re.IGNORECASE)
+        # Check for event number prefix e.g. "Event 6: 58.69" or "#6 58.69" or "6, 26.56"
+        num_match = re.match(r"^(?:event\s*#?|#)?(\d+)\b[:,\s-]*(.*)$", t, re.IGNORECASE)
         if num_match:
             ev_no = int(num_match.group(1))
             time_part = num_match.group(2).strip()
-            # Verify ev_no exists
             matching_ev = next((e for e in valid_events if e.number == ev_no), None)
             if matching_ev:
                 try:
                     cs = parse_time_to_centiseconds(time_part)
                     return [(ev_no, cs)]
                 except ValueError:
-                    pass
+                    return [(ev_no, 0)]
 
-        # Check for standard distance + stroke matching e.g. "50 Free 23.69", "100 Back"
-        # Only attempt if it looks simple (single line)
+        # Check for distance + stroke matching e.g. "50 Free 23.69", "100 Back"
         for ev in valid_events:
-            # Check gender compatibility
             if ev.gender not in ("X", gender_code):
                 continue
 
@@ -151,7 +265,6 @@ class NLPExtractor:
     ) -> List[Tuple[int, int]]:
         client = self._get_client()
 
-        # Build candidate event descriptions for the prompt
         events_desc = [
             f"#{e.number}: {e.distance} {e.stroke.title()} ({e.gender})"
             for e in valid_events
@@ -186,10 +299,8 @@ class NLPExtractor:
 
             raw_json = response.choices[0].message.content or "{}"
             data = json.loads(raw_json)
-            # data could be {"entries": [...]} or directly a list
             items = data.get("entries", data) if isinstance(data, dict) else data
             if not isinstance(items, list):
-                # Search for any list inside data
                 for val in data.values():
                     if isinstance(val, list):
                         items = val
