@@ -61,6 +61,7 @@ def process_entries_csv(
     team_id: int = 1,
     first_name_col: Optional[str] = None,
     last_name_col: Optional[str] = None,
+    id_col: Optional[str] = None,
     gender_col: Optional[str] = None,
     events_col: Optional[str] = None,
     times_col: Optional[str] = None,
@@ -72,6 +73,7 @@ def process_entries_csv(
 
     fn_col = first_name_col or detected.get("first_name")
     ln_col = last_name_col or detected.get("last_name")
+    id_c = id_col or detected.get("id")
     gen_col = gender_col or detected.get("gender")
     ev_c = events_col or detected.get("events_col")
     tm_c = times_col or detected.get("times_col")
@@ -92,6 +94,8 @@ def process_entries_csv(
             reserved.add(gen_col)
         if tm_c:
             reserved.add(tm_c)
+        if id_c:
+            reserved.add(id_c)
         ignored = {"timestamp", "emailaddress", "email", "notes", "comments", "grade", "class", "payment"}
         event_cols = [
             h for h in headers
@@ -117,8 +121,11 @@ def process_entries_csv(
         )
 
         lookup_key = f"{fn.lower()}|{ln.lower()}"
+        # Priority for ID: (1) athlete_id_map from roster, (2) direct ID column in entries CSV
+        direct_id = row.get(id_c, "").strip() if id_c else ""
+        id_no = athlete_id_map.get(lookup_key, direct_id)
+
         if lookup_key not in athlete_lookup:
-            id_no = athlete_id_map.get(lookup_key, "")
             ath = Athlete(
                 athlete_id=athlete_pk,
                 first_name=fn,
@@ -134,13 +141,15 @@ def process_entries_csv(
             ath = athlete_lookup[lookup_key]
             if ath.gender == "X" and gender != "X":
                 ath.gender = gender
+            if not ath.id_no and id_no:
+                ath.id_no = id_no
 
         if is_form_style and ev_c:
             # Form style: Events in ev_c, seed times in tm_c
             raw_events = row.get(ev_c, "")
             raw_times = row.get(tm_c, "") if tm_c else ""
 
-            # 1. Parse chosen event numbers
+            # 1. Parse chosen event numbers (matches MtEvent in the meet)
             chosen_events = parse_events_field(raw_events, ath.gender, valid_events)
             # 2. Parse custom seed times
             custom_times = parse_times_field(raw_times, ath.gender, valid_events) if raw_times else {}
@@ -155,6 +164,8 @@ def process_entries_csv(
                         team_id=team_id,
                         event_number=ev_num,
                         score=score,
+                        course="Y",
+                        individual_or_relay="I",
                     )
                 )
                 entry_pk += 1
@@ -190,6 +201,8 @@ def process_entries_csv(
                             team_id=team_id,
                             event_number=header_match.number,
                             score=cs,
+                            course="Y",
+                            individual_or_relay="I",
                         )
                     )
                     entry_pk += 1
@@ -204,6 +217,8 @@ def process_entries_csv(
                                 team_id=team_id,
                                 event_number=ev_num,
                                 score=cs,
+                                course="Y",
+                                individual_or_relay="I",
                             )
                         )
                         entry_pk += 1

@@ -109,15 +109,17 @@ def resolve_entry_columns(
     skip_interactive: bool = False,
     first_name_col: Optional[str] = None,
     last_name_col: Optional[str] = None,
+    id_col: Optional[str] = None,
     gender_col: Optional[str] = None,
     events_col: Optional[str] = None,
     times_col: Optional[str] = None,
 ) -> Dict[str, Optional[str]]:
-    """Determine column mappings for meet entries CSV (first name, last name, gender, events, custom times)."""
+    """Determine column mappings for meet entries CSV (first name, last name, athlete id, gender, events, custom times)."""
     detected = auto_detect_entry_columns(headers)
 
     fn = first_name_col or detected["first_name"]
     ln = last_name_col or detected["last_name"]
+    id_c = id_col or detected.get("id")
     gen = gender_col or detected["gender"]
     ev_c = events_col or detected["events_col"]
     time_c = times_col or detected["times_col"]
@@ -126,6 +128,7 @@ def resolve_entry_columns(
         return {
             "first_name": fn,
             "last_name": ln,
+            "id_col": id_c,
             "gender": gen,
             "events_col": ev_c,
             "times_col": time_c,
@@ -135,6 +138,7 @@ def resolve_entry_columns(
     click.echo("\n--- Map Meet Entries CSV Columns ---")
     fn = select_column_interactively("First Name", headers, fn, allow_none=False)
     ln = select_column_interactively("Last Name", headers, ln, allow_none=False)
+    id_c = select_column_interactively("Athlete ID (if in this CSV)", headers, id_c, allow_none=True)
     gen = select_column_interactively("Gender / Division", headers, gen, allow_none=True)
     ev_c = select_column_interactively("Chosen Events", headers, ev_c, allow_none=True)
     time_c = select_column_interactively("Custom / Seed Times", headers, time_c, allow_none=True)
@@ -142,6 +146,7 @@ def resolve_entry_columns(
     return {
         "first_name": fn,
         "last_name": ln,
+        "id_col": id_c,
         "gender": gen,
         "events_col": ev_c,
         "times_col": time_c,

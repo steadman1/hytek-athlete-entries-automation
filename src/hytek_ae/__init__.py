@@ -87,7 +87,7 @@ def main(
     click.echo("  Hy-Tek Athlete & Entries Automation (Team Manager 8.0 Lite)")
     click.echo("=" * 60)
 
-    # 1. Resolve required file paths if not passed as flags (using CleanPath for prompts too)
+    # 1. Resolve required and optional file paths
     clean_existing_file = CleanPath(exists=True, dir_okay=False)
     clean_dest_file = CleanPath(dir_okay=False)
 
@@ -97,15 +97,24 @@ def main(
             type=clean_existing_file,
         )
 
+    # In wizard mode, ask for the athlete IDs CSV if not provided via -ids flag
+    if not athlete_ids_path and not non_interactive:
+        ask_ids = click.confirm("\nDo you have an athlete roster / IDs CSV (e.g. memberTable.csv)?", default=True)
+        if ask_ids:
+            athlete_ids_path = click.prompt(
+                "Enter path to athlete IDs .csv file",
+                type=clean_existing_file,
+            )
+
     if not entries_path:
         entries_path = click.prompt(
-            "Enter path to entries .csv file",
+            "\nEnter path to entries .csv file",
             type=clean_existing_file,
         )
 
     if not output_path:
         output_path = click.prompt(
-            "Enter output .mdb file path",
+            "\nEnter output .mdb file path",
             default="meet_entries.mdb",
             type=clean_dest_file,
         )
@@ -137,7 +146,7 @@ def main(
         )
         click.echo(f"  Loaded {len(athlete_id_map)} athlete ID mappings.")
 
-    # 5. Map entries columns (interactive or auto-detected)
+    # 5. Map entries columns (interactive or auto-detected, including Athlete ID if present in entries CSV)
     entries_headers, _ = read_csv_rows(entries_path)
     entry_cols = resolve_entry_columns(entries_headers, skip_interactive=non_interactive)
 
@@ -159,6 +168,7 @@ def main(
         team_id=team.team_id,
         first_name_col=entry_cols["first_name"],
         last_name_col=entry_cols["last_name"],
+        id_col=entry_cols.get("id_col"),
         gender_col=entry_cols["gender"],
         events_col=entry_cols["events_col"],
         times_col=entry_cols["times_col"],
