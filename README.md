@@ -1,16 +1,84 @@
 # Hytek Athlete and Entries Automation
 
-A CLI-tool for populating .mdb files for use in Hytek's Team Manager software
+A CLI tool for programmatically generating `.mdb` database files for **Hy-Tek Team Manager 8.0 Lite**.
+
+## Overview
+
+Entering single-team athletes and meet entries manually inside Team Manager is tedious. This tool takes:
+1. A **`.hyv` meet events file** (exported from Meet Manager)
+2. An **`athlete_ids.csv`** file containing athlete names and coach-assigned IDs
+3. An **`entries.csv`** spreadsheet (e.g., Google Forms/Sheets export) with names, gender, events, and seed times
+
+It automatically maps athletes to their IDs, resolves swim events and times (via fast deterministic matching or an optional OpenAI completions endpoint for messy text), and generates a ready-to-use `.mdb` database file by cloning and populating the Team Manager template.
+
+> **Environment Note:** Writing directly to a `.mdb` database requires the **Microsoft Access Database Engine** and pyodbc on a Windows (or virtualized Windows) machine. The parsing, NLP, and model verification logic can run anywhere.
+
+---
+
+## Installation
+
+Using [uv](https://github.com/astral-sh/uv):
+
+```bash
+uv sync
+```
+
+---
 
 ## Usage
 
-This tool is built for coaches that are entering single-team athletes and entries for meets inside **Team Manager 8.0 Lite** and find the process tedious. It is also built to take in all required info from one or more *.csv files and programmatically populate athlete info including IDs and populate entry info using NLP (optional).
+### Interactive Wizard (Default)
+Simply run the CLI and follow the guided prompts:
 
-**This too must be run on a Windows (or virtualized windows) machine with a Microsoft Access Database Engine installation** (gross)
+```bash
+uv run hytek-automated-athletes-entries
+```
 
-## Input
-- **.hyv** which contains valid events for entry
-- **althletes.csv** which contains columns with first name, last name, and athlete ID (optional)
-- **entries.csv** which contains columns with (UPDATE) first name, last name, gender, events, custom times
-  - [Form template we use](https://docs.google.com/forms/d/1_5v9OgbT_4q61MsBgtTZwK1yvOSkMpWTPARDmZM_7Fo/edit)
-  - [Sheet template we get from the form](https://docs.google.com/spreadsheets/d/1ER1hUFQehKXsMGF54FkG0XjhNp1Oud5mWl59T8nKghk/edit?usp=sharing)
+The wizard will:
+1. Ask for paths if not provided.
+2. Prompt for team information (Code, Name, City, State, etc.).
+3. Load the meet events from the `.hyv` file.
+4. Auto-detect columns in your CSVs and let you confirm or adjust them.
+5. Populate the `.mdb` database.
+
+### Scripted / CLI Flags (Skip Steps)
+Provide command-line flags to skip individual steps or run non-interactively:
+
+```bash
+uv run hytek-automated-athletes-entries \
+  -hyv "meet.hyv" \
+  -ids "athletes.csv" \
+  -e "entries.csv" \
+  -o "meet_entries.mdb" \
+  --team-code "VTECH" \
+  --team-name "Swim Club at Virginia Tech" \
+  --non-interactive
+```
+
+### NLP Event & Time Extraction (Optional)
+If your entries CSV contains unstructured free-text (e.g. `"50 Free 23.5, 100 Fly 54.63"` or `"5 min 30 sec"`), you can pass an OpenAI API key or endpoint:
+
+```bash
+uv run hytek-automated-athletes-entries \
+  -hyv "meet.hyv" \
+  -e "entries.csv" \
+  -o "meet_entries.mdb" \
+  --openai-api-key "sk-..." \
+  --openai-base-url "https://api.openai.com/v1"
+```
+
+Or set the environment variables:
+```bash
+export OPENAI_API_KEY="sk-..."
+export OPENAI_BASE_URL="https://api.openai.com/v1"
+```
+
+---
+
+## Running Tests
+
+All unit tests and end-to-end pipeline tests can be run locally on macOS/Linux:
+
+```bash
+uv run pytest -v
+```

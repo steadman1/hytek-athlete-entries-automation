@@ -1,72 +1,166 @@
+"""Main entry point for Hy-Tek Athlete and Entries Automation."""
+from __future__ import annotations
+
+import os
+import sys
 from pathlib import Path
+from typing import List, Optional
 
 import click
 
-# TODO:
-#
-# parse .hyv events file and build list of valid events
-# parse .csv files
-# return path to .mdb file
-
-# available flags
-# --events-path OR -hyv ".hyv file"
-# --athlete-ids-path OR -ids ".csv file"
-# --entries-path OR -e ".csv file"
-# --output-path OR -o "populated .mdb file"
+from hytek_ae.cli.pipeline import build_athlete_id_map, process_entries_csv
+from hytek_ae.cli.prompts import prompt_team_info, resolve_athlete_columns
+from hytek_ae.core.csv_reader import read_csv_rows
+from hytek_ae.core.hyv_parser import load_hyv_file
+from hytek_ae.core.models import Team
+from hytek_ae.core.nlp import NLPExtractor
+from hytek_ae.db.writer import write_meet_database
 
 
-@click.command()
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.option(
     "-hyv",
     "--events-path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help=".hyv (hytek events) file path containing events for a specific swim meet",
 )
 @click.option(
     "-ids",
     "--athlete-ids-path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help=".csv file path containing athletes' first name, last name, and IDs",
 )
 @click.option(
     "-e",
     "--entries-path",
-    help=".csv file path containing athletes' chosen events, custom times, gender, etc. (see README.md for more info)",
-)  # TODO: add all fields
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help=".csv file path containing athletes' chosen events, custom times, gender, etc.",
+)
 @click.option(
     "-o",
     "--output-path",
-    help="file path to place the resulting .mdb file",
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="File path to place the resulting populated .mdb file",
 )
-def main() -> Path:
-    # first, create Team object by taking direct cli input:
-    #   5-char abbreviation
-    #   full team name
-    #   team registration (default: OTH)
-    #   team type (default: OTH)
-    #   address
-    #   city
-    #   postal code
-    #   email address
-    #   state
-    #   country
+@click.option(
+    "--team-code",
+    help="Team 5-character abbreviation code (skips prompt if provided, e.g. VTECH)",
+)
+@click.option(
+    "--team-name",
+    help="Full team name (e.g. 'Swim Club at Virginia Tech')",
+)
+@click.option(
+    "--openai-api-key",
+    envvar="OPENAI_API_KEY",
+    help="OpenAI API Key for NLP extraction (falls back to OPENAI_API_KEY env var)",
+)
+@click.option(
+    "--openai-base-url",
+    envvar="OPENAI_BASE_URL",
+    help="Custom OpenAI completions endpoint / base URL",
+)
+@click.option(
+    "--non-interactive",
+    is_flag=True,
+    default=False,
+    help="Run without interactive wizard prompts, auto-detecting all columns",
+)
+def main(
+    events_path: Optional[Path],
+    athlete_ids_path: Optional[Path],
+    entries_path: Optional[Path],
+    output_path: Optional[Path],
+    team_code: Optional[str],
+    team_name: Optional[str],
+    openai_api_key: Optional[str],
+    openai_base_url: Optional[str],
+    non_interactive: bool,
+) -> None:
+    """Hy-Tek Athlete and Entries Automation CLI."""
+    click.echo("=" * 60)
+    click.echo("  Hy-Tek Athlete & Entries Automation (Team Manager 8.0 Lite)")
+    click.echo("=" * 60)
 
-    # second, parse the athletes .csv and ask user to select which columns should act as which fields
-    #   first name
-    #   last name
-    #   ID
+    # 1. Resolve required file paths if not passed as flags
+    if not events_path:
+        events_path = Path(click.prompt("\nEnter path to .hyv events file", type=click.Path(exists=True, dir_okay=False)))
 
-    # third, parse the entrie .csv and ask user to select which columns should act as which fields
+    if not entries_path:
+        entries_path = Path(click.prompt("Enter path to entries .csv file", type=click.Path(exists=True, dir_okay=False)))
 
-    # fourth, build Athlete objects:
-    #   first name
-    #   last name
-    #   gender
-    #   team
-    #   ID
+    if not output_path:
+        default_out = Path("meet_entries.mdb")
+        output_path = Path(click.prompt("Enter output .mdb file path", default=str(default_out)))
 
-    # fifth,
+    # 2. Team information step
+    if team_code and team_name:
+        team = Team(code=team_code, name=team_name)
+    elif non_interactive:
+        team = Team(code=team_code or "TEAM1", name=team_name or "My Swim Team")
+    else:
+        team = prompt_team_info()
 
-    return Path()
+    # 3. Parse HYV meet events
+    click.echo(f"\nParsing meet events from: {events_path}")
+    meet, valid_events = load_hyv_file(events_path)
+    click.echo(f"  Meet: {meet.name} ({len(valid_events)} events found)")
+
+    # 4. Parse athlete IDs if provided
+    athlete_id_map = {}
+    if athlete_ids_path:
+        click.echo(f"\nProcessing athlete IDs from: {athlete_ids_path}")
+        if not non_interactive:
+            headers, _ = read_csv_rows(athlete_ids_path)
+            col_map = resolve_athlete_columns(headers, skip_interactive=non_interactive)
+            athlete_id_map = build_athlete_id_map(
+                athlete_ids_path,
+                first_name_col=col_map["first_name"],
+                last_name_col=col_map["last_name"],
+                id_col=col_map["id"],
+            )
+        else:
+            athlete_id_map = build_athlete_id_map(athlete_ids_path)
+        click.echo(f"  Loaded {len(athlete_id_map)} athlete ID mappings.")
+
+    # 5. Initialize NLP Extractor
+    nlp = NLPExtractor(api_key=openai_api_key, base_url=openai_base_url)
+    if nlp.is_available:
+        click.echo("  NLP Extractor: enabled with OpenAI completions.")
+    else:
+        click.echo("  NLP Extractor: deterministic matching only (no API key provided).")
+
+    # 6. Process Entries CSV
+    click.echo(f"\nProcessing entries from: {entries_path}...")
+    athletes, entries = process_entries_csv(
+        entries_csv_path=entries_path,
+        valid_events=valid_events,
+        athlete_id_map=athlete_id_map,
+        nlp_extractor=nlp,
+        meet_id=meet.meet_id,
+        team_id=team.team_id,
+    )
+    click.echo(f"  Created {len(athletes)} athletes and {len(entries)} meet entries.")
+
+    # 7. Write to output Access database
+    click.echo(f"\nWriting to Microsoft Access database: {output_path}")
+    try:
+        write_meet_database(
+            output_path=output_path,
+            team=team,
+            meet=meet,
+            athletes=athletes,
+            entries=entries,
+            overwrite=True,
+        )
+        click.secho(f"\nSUCCESS! Meet entries database created at: {output_path.resolve()}", fg="green", bold=True)
+    except Exception as exc:
+        click.secho(f"\nDatabase write error: {exc}", fg="red")
+        click.echo(
+            "\nNote: Writing directly to an .mdb file requires Microsoft Access Database Engine (Windows). "
+            "If running on macOS or Linux, transfer the output files or test on Windows."
+        )
 
 
-if __name__ in "__main__":
-    pass
+if __name__ == "__main__":
+    main()
