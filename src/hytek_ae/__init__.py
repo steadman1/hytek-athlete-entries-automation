@@ -8,6 +8,7 @@ from typing import List, Optional
 
 import click
 
+from hytek_ae.cli.clean_path import CleanPath
 from hytek_ae.cli.pipeline import build_athlete_id_map, process_entries_csv
 from hytek_ae.cli.prompts import (
     prompt_team_info,
@@ -25,25 +26,25 @@ from hytek_ae.db.writer import write_meet_database
 @click.option(
     "-hyv",
     "--events-path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    type=CleanPath(exists=True, dir_okay=False),
     help=".hyv (hytek events) file path containing events for a specific swim meet",
 )
 @click.option(
     "-ids",
     "--athlete-ids-path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    type=CleanPath(exists=True, dir_okay=False),
     help=".csv file path containing athletes' first name, last name, and IDs (e.g. memberTable.csv from College Club Swimming)",
 )
 @click.option(
     "-e",
     "--entries-path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    type=CleanPath(exists=True, dir_okay=False),
     help=".csv file path containing athletes' chosen events, custom times, gender, etc.",
 )
 @click.option(
     "-o",
     "--output-path",
-    type=click.Path(dir_okay=False, path_type=Path),
+    type=CleanPath(dir_okay=False),
     help="File path to place the resulting populated .mdb file",
 )
 @click.option(
@@ -86,16 +87,28 @@ def main(
     click.echo("  Hy-Tek Athlete & Entries Automation (Team Manager 8.0 Lite)")
     click.echo("=" * 60)
 
-    # 1. Resolve required file paths if not passed as flags
+    # 1. Resolve required file paths if not passed as flags (using CleanPath for prompts too)
+    clean_existing_file = CleanPath(exists=True, dir_okay=False)
+    clean_dest_file = CleanPath(dir_okay=False)
+
     if not events_path:
-        events_path = Path(click.prompt("\nEnter path to .hyv events file", type=click.Path(exists=True, dir_okay=False)))
+        events_path = click.prompt(
+            "\nEnter path to .hyv events file",
+            type=clean_existing_file,
+        )
 
     if not entries_path:
-        entries_path = Path(click.prompt("Enter path to entries .csv file", type=click.Path(exists=True, dir_okay=False)))
+        entries_path = click.prompt(
+            "Enter path to entries .csv file",
+            type=clean_existing_file,
+        )
 
     if not output_path:
-        default_out = Path("meet_entries.mdb")
-        output_path = Path(click.prompt("Enter output .mdb file path", default=str(default_out)))
+        output_path = click.prompt(
+            "Enter output .mdb file path",
+            default="meet_entries.mdb",
+            type=clean_dest_file,
+        )
 
     # 2. Team information step
     if team_code and team_name:

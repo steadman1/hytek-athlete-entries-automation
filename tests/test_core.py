@@ -1,7 +1,9 @@
-"""Unit tests for time parsing, csv reading, and SQL generators."""
+"""Unit tests for time parsing, csv reading, clean path handling, and SQL generators."""
 import pytest
 from datetime import date
+from pathlib import Path
 
+from hytek_ae.cli.clean_path import CleanPath, clean_path_string
 from hytek_ae.core.models import Athlete, Entry, Meet, MeetEvent, Team
 from hytek_ae.core.time_parser import format_centiseconds, parse_time_to_centiseconds
 from hytek_ae.core.csv_reader import auto_detect_athlete_columns, auto_detect_entry_columns
@@ -12,6 +14,17 @@ from hytek_ae.db.operations import (
     pack_meet_params,
     pack_team_params,
 )
+
+
+def test_clean_path_handling():
+    # Surrounding single quotes
+    assert clean_path_string("  '/path/to/file.csv'  ") == "/path/to/file.csv"
+    # Surrounding double quotes
+    assert clean_path_string('  "/path/to/file.csv"  ') == "/path/to/file.csv"
+    # Nested quotes
+    assert clean_path_string(" '\"/path/to/file.csv\"' ") == "/path/to/file.csv"
+    # Escaped spaces from terminal drag-and-drop
+    assert clean_path_string("  '/path/to/my\\ file.csv'  ") == "/path/to/my file.csv"
 
 
 def test_time_parsing_centiseconds():
