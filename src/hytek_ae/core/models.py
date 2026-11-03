@@ -70,6 +70,17 @@ class Meet:
         self.country = (self.country or "USA").strip()[:20]
 
 
+# Stroke integer codes for Team Manager MTEVENTE table:
+# 1 = Freestyle, 2 = Backstroke, 3 = Breaststroke, 4 = Butterfly, 5 = Medley
+STROKE_NAME_TO_CODE = {
+    "FREESTYLE": 1,
+    "BACKSTROKE": 2,
+    "BREASTSTROKE": 3,
+    "BUTTERFLY": 4,
+    "MEDLEY": 5,
+}
+
+
 @dataclass
 class MeetEvent:
     number: int
@@ -78,12 +89,23 @@ class MeetEvent:
     stroke: str  # "FREESTYLE", "BACKSTROKE", "BREASTSTROKE", "BUTTERFLY", "MEDLEY"
     is_relay: bool = False
     name: str = ""
+    session: int = 1
+    lo_hi: int = 99  # Open age group (0 to 109) in TM MTEVENTE is 99
+    fee: float = 0.0
 
     def __post_init__(self) -> None:
         g = self.gender.upper() if self.gender else "X"
         self.gender = "M" if g.startswith("M") else ("F" if g.startswith("F") else "X")
         if not self.name:
             self.name = f"{self.distance} {self.stroke.title()} ({self.gender})"
+
+    @property
+    def stroke_code(self) -> int:
+        return STROKE_NAME_TO_CODE.get(self.stroke.upper(), 1)
+
+    @property
+    def individual_or_relay(self) -> str:
+        return "R" if self.is_relay else "I"
 
 
 @dataclass

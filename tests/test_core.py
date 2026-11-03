@@ -12,6 +12,7 @@ from hytek_ae.db.operations import (
     pack_athlete_params,
     pack_entry_params,
     pack_meet_params,
+    pack_mtevente_params,
     pack_team_params,
 )
 
@@ -142,3 +143,15 @@ def test_param_packing_matches_schema():
     assert ent_params[5] == 5869
     assert ent_params[6] == 6
     assert ent_params[7] == 1
+
+    # MTEVENTE parameter packing
+    ev = MeetEvent(number=6, gender="M", distance=100, stroke="MEDLEY")
+    mtev_params = pack_mtevente_params(meet_id=1, event=ev)
+    assert mtev_params[0] == 1  # Meet
+    assert mtev_params[1] == 6  # MtEv
+    assert mtev_params[2] == 99  # Lo_Hi (Open)
+    assert mtev_params[3] == 6  # MtEvent
+    assert mtev_params[4] == 100  # Distance
+    assert mtev_params[5] == 5  # Stroke code (5 = Medley)
+    assert mtev_params[6] == "M"  # Sex
+    assert mtev_params[7] == "I"  # I_R (Individual)

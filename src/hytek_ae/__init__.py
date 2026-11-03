@@ -184,6 +184,7 @@ def main(
             meet=meet,
             athletes=athletes,
             entries=entries,
+            events=valid_events,
             overwrite=True,
         )
         click.secho(f"\nSUCCESS! Meet entries database created at: {output_path.resolve()}", fg="green", bold=True)

@@ -5,17 +5,19 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from hytek_ae.core.models import Athlete, Entry, Meet, Team
+from hytek_ae.core.models import Athlete, Entry, Meet, MeetEvent, Team
 from hytek_ae.db.get_db import get_db
 from hytek_ae.db.operations import (
     SQL_INSERT_ATHLETE,
     SQL_INSERT_ENTRY,
     SQL_INSERT_MEET,
+    SQL_INSERT_MTEVENTE,
     SQL_INSERT_TEAM,
     initialize_output_mdb,
     pack_athlete_params,
     pack_entry_params,
     pack_meet_params,
+    pack_mtevente_params,
     pack_team_params,
 )
 
@@ -28,6 +30,7 @@ def write_meet_database(
     meet: Meet,
     athletes: List[Athlete],
     entries: List[Entry],
+    events: Optional[List[MeetEvent]] = None,
     overwrite: bool = True,
 ) -> Path:
     """Copy template and execute all INSERT statements to produce the populated .mdb file."""
@@ -43,6 +46,11 @@ def write_meet_database(
         # Insert MEET
         cursor.execute(SQL_INSERT_MEET, pack_meet_params(meet))
 
+        # Insert MTEVENTE (Meet events from the HYV)
+        if events:
+            for ev in events:
+                cursor.execute(SQL_INSERT_MTEVENTE, pack_mtevente_params(meet.meet_id, ev))
+
         # Insert Athletes in batches
         for ath in athletes:
             cursor.execute(SQL_INSERT_ATHLETE, pack_athlete_params(ath))
@@ -53,7 +61,8 @@ def write_meet_database(
 
         conn.commit()
         logger.info(
-            "Successfully wrote %d athletes and %d entries to %s",
+            "Successfully wrote %d events, %d athletes and %d entries to %s",
+            len(events or []),
             len(athletes),
             len(entries),
             dest,

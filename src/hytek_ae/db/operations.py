@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Iterable, List, Optional, Tuple
 
-from hytek_ae.core.models import Athlete, Entry, Meet, Team
+from hytek_ae.core.models import Athlete, Entry, Meet, MeetEvent, Team
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,6 @@ INSERT INTO [MEET] (
 
 
 def pack_meet_params(meet: Meet) -> Tuple[Any, ...]:
-    # Format dates as MM/DD/YYYY
     start_dt = meet.start_date.strftime("%m/%d/%Y 00:00:00")
     end_dt = meet.end_date.strftime("%m/%d/%Y 00:00:00")
     ageup_dt = (meet.age_up_date or meet.start_date).strftime("%m/%d/%Y 00:00:00")
@@ -154,6 +153,33 @@ def pack_meet_params(meet: Meet) -> Tuple[Any, ...]:
         1,  # FileExportType
         0,  # EV3Version
         False,  # OMENeedsSync
+    )
+
+
+SQL_INSERT_MTEVENTE = """
+INSERT INTO [MTEVENTE] (
+    [Meet], [MtEv], [Lo_Hi], [MtEvent], [Distance], [Stroke],
+    [Sex], [I_R], [Session], [Fee], [GenderMix]
+) VALUES (
+    ?, ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?
+)
+"""
+
+
+def pack_mtevente_params(meet_id: int, event: MeetEvent) -> Tuple[Any, ...]:
+    return (
+        int(meet_id),
+        int(event.number),
+        int(event.lo_hi),
+        int(event.number),
+        int(event.distance),
+        int(event.stroke_code),
+        event.gender,
+        event.individual_or_relay,
+        int(event.session),
+        float(event.fee),
+        0,  # GenderMix
     )
 
 
