@@ -66,6 +66,12 @@ from hytek_ae.db.writer import write_meet_database
     help="Custom OpenAI completions endpoint / base URL",
 )
 @click.option(
+    "--force-nlp",
+    is_flag=True,
+    default=False,
+    help="Force NLP (OpenAI completion) extraction for custom times and entries rather than trying deterministic matching first",
+)
+@click.option(
     "--non-interactive",
     is_flag=True,
     default=False,
@@ -80,6 +86,7 @@ def main(
     team_name: Optional[str],
     openai_api_key: Optional[str],
     openai_base_url: Optional[str],
+    force_nlp: bool,
     non_interactive: bool,
 ) -> None:
     """Hy-Tek Athlete and Entries Automation CLI."""
@@ -151,9 +158,16 @@ def main(
     entry_cols = resolve_entry_columns(entries_headers, skip_interactive=non_interactive)
 
     # 6. Initialize NLP Extractor
-    nlp = NLPExtractor(api_key=openai_api_key, base_url=openai_base_url)
+    nlp = NLPExtractor(
+        api_key=openai_api_key,
+        base_url=openai_base_url,
+        force_nlp=force_nlp,
+    )
     if nlp.is_available:
-        click.echo("  NLP Extractor: enabled with OpenAI completions.")
+        if force_nlp:
+            click.echo("  NLP Extractor: enabled with OpenAI completions (FORCE NLP active).")
+        else:
+            click.echo("  NLP Extractor: enabled with OpenAI completions.")
     else:
         click.echo("  NLP Extractor: deterministic matching enabled.")
 

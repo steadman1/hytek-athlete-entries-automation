@@ -151,8 +151,8 @@ def process_entries_csv(
 
             # 1. Parse chosen event numbers (matches MtEvent in the meet)
             chosen_events = parse_events_field(raw_events, ath.gender, valid_events)
-            # 2. Parse custom seed times
-            custom_times = parse_times_field(raw_times, ath.gender, valid_events) if raw_times else {}
+            # 2. Parse custom seed times (uses NLPExtractor.parse_custom_times to respect force_nlp)
+            custom_times = nlp_extractor.parse_custom_times(raw_times, ath.gender, valid_events) if raw_times else {}
 
             for ev_num in chosen_events:
                 score = custom_times.get(ev_num, 0)

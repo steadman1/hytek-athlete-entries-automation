@@ -35,7 +35,6 @@ def _pad_centiseconds(raw_c: Optional[str]) -> int:
     """Convert raw centisecond / millisecond digits into 2-digit centiseconds (0-99)."""
     if not raw_c:
         return 0
-    # Strip any extra dots/colons
     clean = raw_c.strip()
     if len(clean) == 1:
         return int(clean) * 10
@@ -63,10 +62,11 @@ def parse_time_to_centiseconds(raw: Optional[str | float | int]) -> int:
             return 0
         if raw == 0:
             return 0
-        # If passed a float like 58.69 -> 5869
         return int(round(float(raw) * 100))
 
-    s = str(raw).strip()
+    # Strip quotes, parentheses, and outer whitespace
+    s = str(raw)
+    s = re.sub(r"[\'\"()]", "", s).strip()
     if not s or _PATTERN_NT.match(s):
         return 0
 

@@ -1,6 +1,7 @@
 """OpenAI integration and deterministic parsers for meet entries and messy times.
 
 Interprets free-text and form inputs like:
+  "50 back: 3, 28.63 50 fly: 13, 28.68 50 free: 19, 24.33"
   "19-20: 50 Breast, 23-24: 50 Free"
   "100 Free: 48.83\n100 Fly: 54.63\n50 Free: 22.20"
   "6, 26.56"
@@ -86,12 +87,37 @@ def parse_events_field(
     return [x for x in matched_event_nums if not (x in seen or seen.add(x))]
 
 
+def _find_event_by_stroke(
+    desc: str,
+    athlete_gender: str,
+    valid_events: List[MeetEvent],
+) -> Optional[int]:
+    """Helper to match a stroke phrase like '50 back' or '100 Free' to an event number."""
+    gender_code = athlete_gender.upper()[:1] if athlete_gender else "X"
+    for ev in valid_events:
+        if ev.gender not in ("X", gender_code):
+            continue
+        dist_str = str(ev.distance)
+        stroke_terms = {
+            "FREESTYLE": ["free", "freestyle", "fr"],
+            "BACKSTROKE": ["back", "backstroke", "bk"],
+            "BREASTSTROKE": ["breast", "breaststroke", "br"],
+            "BUTTERFLY": ["fly", "butterfly", "fl"],
+            "MEDLEY": ["im", "medley", "individual medley"],
+        }.get(ev.stroke, [])
+        pattern = rf"\b{dist_str}\b\s*(?:{'|'.join(stroke_terms)})\b"
+        if re.search(pattern, desc, re.IGNORECASE):
+            return ev.number
+    return None
+
+
 def parse_times_field(
     times_text: str,
     athlete_gender: str,
     valid_events: List[MeetEvent],
 ) -> Dict[int, int]:
     """Parse custom times text like:
+        "50 back: 3, 28.63 50 fly: 13, 28.68 50 free: 19, 24.33"
         "100 Free: 48.83\n100 Fly: 54.63\n50 Free: 22.20"
         "6, 26.56"
         "Event 24: 23.69"
@@ -100,49 +126,48 @@ def parse_times_field(
     if not times_text or not times_text.strip():
         return {}
 
+    # Pre-clean string: strip all quotes (" and ') and parentheses (( and ))
+    clean_text = re.sub(r"[\'\"()]", "", str(times_text)).strip()
+    if not clean_text:
+        return {}
+
     gender_code = athlete_gender.upper()[:1] if athlete_gender else "X"
     times_map: Dict[int, int] = {}
 
-    lines = re.split(r"[\n\r;]+", times_text)
-    for line in lines:
-        l = line.strip()
-        if not l:
+    # Comprehensive multi-pattern regex matching:
+    # 1) Optional event stroke description: e.g. "50 back:" or "100 Free:" or "50 Free 23.69"
+    # 2) Optional event number: e.g. "3," or "Event 6:"
+    # 3) Time token: e.g. "28.63", "1:01.01", "24", "NT"
+    pattern = re.compile(
+        r"(?:(?P<desc>\d{1,4}\s*(?:free(?:style)?|back(?:stroke)?|breast(?:stroke)?|fly|butterfly|im|medley))\s*[:=-]?\s*)?"
+        r"(?:(?:event\s*#?|#)?(?P<ev>\d{1,3})\s*[,:\s-]+\s*)?"
+        r"(?P<time>(?:\d{1,2}:)?\d{1,2}[.:]\d{1,3}|\d{1,2}(?:\.\d{1,2})?|NT|nt)(?:[YSLysl])?",
+        re.IGNORECASE,
+    )
+
+    for m in pattern.finditer(clean_text):
+        desc = m.group("desc")
+        raw_ev = m.group("ev")
+        time_str = m.group("time")
+
+        if not time_str:
             continue
 
-        # Format A: "6, 26.56" or "6: 26.56" or "#6 26.56"
-        m_num = re.match(r"^(?:event\s*#?|#)?(\d+)\s*[,:\s-]+\s*([0-9:.]+)\s*(?:[YSLysl])?$", l, re.IGNORECASE)
-        if m_num:
-            ev_no = int(m_num.group(1))
-            time_str = m_num.group(2)
-            if any(e.number == ev_no for e in valid_events):
-                try:
-                    times_map[ev_no] = parse_time_to_centiseconds(time_str)
-                    continue
-                except ValueError:
-                    pass
+        target_ev: Optional[int] = None
 
-        # Format B: "100 Free: 48.83" or "50 Freestyle: 22.20"
-        for ev in valid_events:
-            if ev.gender not in ("X", gender_code):
-                continue
-            dist_str = str(ev.distance)
-            stroke_terms = {
-                "FREESTYLE": ["free", "freestyle", "fr"],
-                "BACKSTROKE": ["back", "backstroke", "bk"],
-                "BREASTSTROKE": ["breast", "breaststroke", "br"],
-                "BUTTERFLY": ["fly", "butterfly", "fl"],
-                "MEDLEY": ["im", "medley", "individual medley"],
-            }.get(ev.stroke, [])
+        if raw_ev:
+            ev_candidate = int(raw_ev)
+            if any(e.number == ev_candidate for e in valid_events):
+                target_ev = ev_candidate
 
-            pattern = rf"\b{dist_str}\b\s*(?:{'|'.join(stroke_terms)})\b\s*[:=-]?\s*([0-9:.]+)\s*(?:[YSLysl])?"
-            m_stroke = re.search(pattern, l, re.IGNORECASE)
-            if m_stroke:
-                time_str = m_stroke.group(1)
-                try:
-                    times_map[ev.number] = parse_time_to_centiseconds(time_str)
-                    break
-                except ValueError:
-                    pass
+        if target_ev is None and desc:
+            target_ev = _find_event_by_stroke(desc, athlete_gender, valid_events)
+
+        if target_ev is not None:
+            try:
+                times_map[target_ev] = parse_time_to_centiseconds(time_str)
+            except ValueError:
+                times_map[target_ev] = 0
 
     return times_map
 
@@ -155,10 +180,12 @@ class NLPExtractor:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model: str = "gpt-4o-mini",
+        force_nlp: bool = False,
     ) -> None:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
         self.model = model
+        self.force_nlp = force_nlp
         self._client: Any = None
 
     @property
@@ -192,21 +219,52 @@ class NLPExtractor:
         if not raw_text or not raw_text.strip():
             return []
 
-        # First, try pure deterministic matching
-        deterministic = self._try_deterministic_parse(raw_text, athlete_gender, valid_events)
-        if deterministic is not None:
-            return deterministic
+        # If force_nlp is False, try deterministic parsing first
+        if not self.force_nlp:
+            deterministic = self._try_deterministic_parse(raw_text, athlete_gender, valid_events)
+            if deterministic is not None:
+                return deterministic
 
-        # If deterministic fails and no OpenAI key is set, log warning and return empty
+        # If deterministic fails or force_nlp is True:
         if not self.is_available:
+            if self.force_nlp:
+                logger.warning(
+                    "Force NLP was requested but OpenAI API key is not configured; falling back to deterministic parser."
+                )
+                det = self._try_deterministic_parse(raw_text, athlete_gender, valid_events)
+                return det if det is not None else []
             logger.warning(
                 "Could not deterministically parse entry '%s' and OpenAI API key is not configured.",
                 raw_text,
             )
             return []
 
-        # Otherwise, call OpenAI structured output
         return self._call_openai_parse(raw_text, athlete_gender, valid_events)
+
+    def parse_custom_times(
+        self,
+        times_text: str,
+        athlete_gender: str,
+        valid_events: List[MeetEvent],
+    ) -> Dict[int, int]:
+        """Parse custom times text into {event_number: centiseconds}.
+        If force_nlp is True and OpenAI client is available, calls LLM completion.
+        Otherwise uses deterministic parse_times_field().
+        """
+        if not times_text or not times_text.strip():
+            return {}
+
+        if self.force_nlp and self.is_available:
+            entries = self._call_openai_parse(times_text, athlete_gender, valid_events)
+            return dict(entries)
+
+        # Deterministic
+        res = parse_times_field(times_text, athlete_gender, valid_events)
+        if not res and self.is_available:
+            # Fallback to NLP if deterministic returned empty
+            entries = self._call_openai_parse(times_text, athlete_gender, valid_events)
+            return dict(entries)
+        return res
 
     def _try_deterministic_parse(
         self,
@@ -215,45 +273,9 @@ class NLPExtractor:
         valid_events: List[MeetEvent],
     ) -> Optional[List[Tuple[int, int]]]:
         """Try simple, fast matching before calling the API."""
-        t = text.strip()
-        gender_code = athlete_gender.upper()[:1] if athlete_gender else "X"
-
-        # Check for event number prefix e.g. "Event 6: 58.69" or "#6 58.69" or "6, 26.56"
-        num_match = re.match(r"^(?:event\s*#?|#)?(\d+)\b[:,\s-]*(.*)$", t, re.IGNORECASE)
-        if num_match:
-            ev_no = int(num_match.group(1))
-            time_part = num_match.group(2).strip()
-            matching_ev = next((e for e in valid_events if e.number == ev_no), None)
-            if matching_ev:
-                try:
-                    cs = parse_time_to_centiseconds(time_part)
-                    return [(ev_no, cs)]
-                except ValueError:
-                    return [(ev_no, 0)]
-
-        # Check for distance + stroke matching e.g. "50 Free 23.69", "100 Back"
-        for ev in valid_events:
-            if ev.gender not in ("X", gender_code):
-                continue
-
-            dist_str = str(ev.distance)
-            stroke_terms = {
-                "FREESTYLE": ["free", "freestyle", "fr"],
-                "BACKSTROKE": ["back", "backstroke", "bk"],
-                "BREASTSTROKE": ["breast", "breaststroke", "br"],
-                "BUTTERFLY": ["fly", "butterfly", "fl"],
-                "MEDLEY": ["im", "medley", "individual medley"],
-            }.get(ev.stroke, [])
-
-            pattern = rf"\b{dist_str}\b\s*(?:{'|'.join(stroke_terms)})\b(?:\s*[:=-]?\s*([0-9:.]+))?"
-            m = re.search(pattern, t, re.IGNORECASE)
-            if m:
-                time_str = m.group(1)
-                try:
-                    cs = parse_time_to_centiseconds(time_str) if time_str else 0
-                    return [(ev.number, cs)]
-                except ValueError:
-                    return [(ev.number, 0)]
+        times_map = parse_times_field(text, athlete_gender, valid_events)
+        if times_map:
+            return list(times_map.items())
 
         return None
 

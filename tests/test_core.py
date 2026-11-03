@@ -103,6 +103,22 @@ def test_form_fields_parsing():
     assert times.get(24) == 2220
     assert times.get(20) == 2871
 
+    # Test inline stroke + event number + time pattern
+    # e.g. "50 back: 3, 28.63 50 fly: 13, 28.68 50 free: 19, 24.33"
+    inline_events = [
+        MeetEvent(number=3, gender="M", distance=50, stroke="BACKSTROKE"),
+        MeetEvent(number=13, gender="M", distance=50, stroke="BUTTERFLY"),
+        MeetEvent(number=19, gender="M", distance=50, stroke="FREESTYLE"),
+    ]
+    inline_text = "50 back: 3, 28.63 50 fly: 13, 28.68 50 free: 19, 24.33"
+    inline_res = parse_times_field(inline_text, "M", inline_events)
+    # Test quotes and parentheses stripping on times
+    messy_text = '"50 back: (3, 28.63)" \'50 fly: (13, 28.68)\' (50 free: 19, 24.33)'
+    messy_res = parse_times_field(messy_text, "M", inline_events)
+    assert messy_res[3] == 2863
+    assert messy_res[13] == 2868
+    assert messy_res[19] == 2433
+
 
 def test_deterministic_nlp_fallback():
     extractor = NLPExtractor(api_key=None)
